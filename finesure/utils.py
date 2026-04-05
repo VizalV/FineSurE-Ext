@@ -123,6 +123,8 @@ def parsing_llm_fact_checking_output(output):
     except Exception as e:
         
         try:
+            if "category" not in output.lower():
+                return [], []
             subseqs = output.split("category")
 
             def error_detection(subseq):

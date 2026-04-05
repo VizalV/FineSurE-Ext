@@ -6,11 +6,11 @@ from utils import get_response, parsing_llm_fact_checking_output, compute_faithf
 from utils import get_fact_checking_prompt
 
 # api key
-_api_key = #'your openai api key'
-_client = openai.OpenAI(api_key=_api_key)
+# _api_key = #'your openai api key'
+# _client = openai.OpenAI(api_key=_api_key)
 #_model = "gpt-3.5-turbo"
 #_model = "gpt-4-1106-preview"
-_model = "gpt-4o-2024-05-13"
+# _model = "gpt-4o-2024-05-13"
 
 def main(input_path, output_path, print_interval=2):
     '''

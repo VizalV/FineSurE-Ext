@@ -3,21 +3,21 @@
 
 [Evaluation Results]
 * sentence-level factuality error ratio per model (lower is better)
-bert_sum	0.0%
-bus	33.3%
-pgn	16.7%
-s2s	83.3%
-bart	33.3%
+bert_sum	16.7%
+bus	83.3%
+pgn	66.7%
+s2s	100.0%
+bart	66.7%
 
 * summary-level faithfulness score per model (higher is better)
-bert_sum	100.0%
-bus	66.7%
-pgn	83.3%
-s2s	16.7%
-bart	75.0%
+bert_sum	83.3%
+bus	16.7%
+pgn	33.3%
+s2s	0.0%
+bart	37.5%
 
 * system-level model ranking (left is better)
-['bert_sum', 'pgn', 'bart', 'bus', 's2s']
+['bert_sum', 'bart', 'pgn', 'bus', 's2s']
 
 * success rate: 100.0%
 

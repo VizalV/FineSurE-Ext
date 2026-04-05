@@ -21,6 +21,52 @@ FineSurE framework breaks down a complicate evaluation process into ```two simpl
 <img width="755" alt="스크린샷 2024-07-02 오후 4 56 27" src="https://github.com/DISL-Lab/FineSurE-ACL24/assets/10972556/e5c733b7-d863-4e39-92ac-98f63e8bbee5">
 </p>
 
+## FineSurE-Ext: Extensions Completed
+
+This repository extends the original FineSurE pipeline with open-source model support, enhanced factuality reasoning, and analysis utilities for proposal/report-driven experiments.
+
+### 1) Open-source and multi-backend evaluation
+- Added open-source fact-checking and keyfact alignment runners:
+  - `finesure/fact-checking-opensource.py`
+  - `finesure/fact-checking-opensource-enhanced.py`
+  - `finesure/keyfact-alignment-opensource.py`
+- Added centralized model/backend routing in `finesure/model_config.py` to support multiple model families and serving modes.
+
+### 2) Enhanced factuality pipeline
+- Implemented an enhanced two-stage factuality setup (entailment-first + category assignment) in `finesure/fact-checking-opensource-enhanced.py`.
+- Added run diagnostics and summaries to improve error analysis and reproducibility:
+  - `enhanced-diagnostics.jsonl`
+  - `enhanced-summary.json`
+
+### 3) Broader experiment coverage and reproducibility
+- Added experiment presets in `finesure/factuality_experiment_presets.py`.
+- Expanded reproducible result artifacts for multiple model variants (Qwen, Qwen-3B, Llama, GPT-4) under `reproduce/results/` and `reproduce/results/reports/`.
+- Added plotting utility `reproduce/plot_evaluation_reports.py` to generate report-ready visualizations.
+
+### 4) Report-backed observations from current experiments
+- Enhanced Qwen (7B) improves faithfulness quality over base Qwen on key headline metrics.
+- Enhanced Llama currently underperforms base Llama due to conservative error detection behavior (over-predicting "no error").
+- To reduce unnecessary constraints, we removed extra generation restrictions in the enhanced Llama path (for example: forced token cap and rigid optional decoding constraints), while keeping required prompt-format compatibility.
+
+## Proposed Next Steps (Roadmap)
+
+The next phase follows the proposal/report direction and focuses on improving robustness, calibration, and usability:
+
+1. Stage-1 calibration for enhanced Llama
+  - Improve not-entailed detection sensitivity to reduce false "no error" predictions.
+
+2. Prompt and reasoning ablations
+  - Compare single-stage vs two-stage prompts and controlled reasoning variants across FRANK and REALSumm.
+
+3. Category-aware reliability improvements
+  - Add targeted handling for low-recall fine-grained error categories and class imbalance.
+
+4. Efficiency and reliability tracking
+  - Add standardized latency/cost/success logging across model backends.
+
+5. Better experiment UX
+  - Consolidate runners and plotting into a cleaner CLI workflow with consistent output schemas.
+
 ## Running FineSurE on Model Summareis
 
 We create sample datasets with 10 examples for fact-checking and keyfact-alignment tasks, respectively.

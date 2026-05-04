@@ -4,12 +4,17 @@ Generate per-report plots from a single FineSurE evaluation-report.json folder.
 Usage:
     python reproduce/plot_evaluation_reports.py \
             --report-dir reproduce/results/reports/base
+
+Batch usage:
+    python reproduce/plot_evaluation_reports.py \
+            --reports-root reproduce/results/reports
 """
 
 import argparse
 import json
 import os
-from typing import Dict, List, Tuple
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,6 +28,49 @@ FAITH_METRIC_KEYS = [
     ("SysRank", ("faithfulness", "system", "rank_correlation", "statistic")),
     ("Success", ("faithfulness", "success_ratio")),
 ]
+
+DEFAULT_REPORT_ORDER = [
+    "base",
+    "gpt4",
+    "enhanced",
+    "enhanced_sc_qwen_100",
+    "keyfact_two_stage_sc_qwen_100",
+    "keyfact_machine_sc_qwen_100",
+]
+
+
+def _apply_professional_style():
+    plt.rcParams.update(
+        {
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "axes.edgecolor": "#D0D7DE",
+            "axes.linewidth": 1.0,
+            "axes.grid": True,
+            "axes.axisbelow": True,
+            "grid.color": "#E5E7EB",
+            "grid.linestyle": "-",
+            "grid.linewidth": 0.8,
+            "font.size": 12,
+            "axes.titlesize": 18,
+            "axes.labelsize": 14,
+            "xtick.labelsize": 11,
+            "ytick.labelsize": 11,
+            "legend.fontsize": 11,
+            "figure.dpi": 150,
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+        }
+    )
+
+
+def _style_axis(ax):
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#D0D7DE")
+    ax.spines["bottom"].set_color("#D0D7DE")
+    ax.grid(axis="y", alpha=0.9)
+    ax.grid(axis="x", visible=False)
 
 
 def _get_nested(dct: Dict, path: Tuple[str, ...], default=0.0):
@@ -61,20 +109,47 @@ def _report_dirs(reports_root: str) -> List[str]:
     return subdirs
 
 
+def _resolve_report_dirs(report_dir: Optional[str] = None, reports_root: Optional[str] = None) -> List[str]:
+    if report_dir:
+        return [report_dir]
+
+    if not reports_root:
+        return []
+
+    root_path = Path(reports_root)
+    ordered = []
+    seen = set()
+
+    for name in DEFAULT_REPORT_ORDER:
+        candidate = root_path / name
+        report_json = candidate / "evaluation-report.json"
+        if candidate.is_dir() and report_json.is_file():
+            ordered.append(str(candidate))
+            seen.add(str(candidate))
+
+    for candidate in _report_dirs(reports_root):
+        if candidate not in seen:
+            ordered.append(candidate)
+
+    return ordered
+
+
 def _plot_faithfulness_headline(report: Dict, out_path: str, title_suffix: str):
     labels = [k for k, _ in FAITH_METRIC_KEYS]
     vals = [_safe_float(_get_nested(report, path, 0.0)) for _, path in FAITH_METRIC_KEYS]
 
-    plt.figure(figsize=(10, 4.5))
+    fig, ax = plt.subplots(figsize=(10, 5))
     x = np.arange(len(labels))
-    bars = plt.bar(x, vals, color="#2f6ea6")
-    plt.xticks(x, labels)
-    plt.ylim(0, 1.0)
-    plt.ylabel("Score")
-    plt.title(f"Faithfulness Headline Metrics ({title_suffix})")
+    bars = ax.bar(x, vals, color="#355C7D", edgecolor="white", linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("Score")
+    ax.set_title(f"Faithfulness Headline Metrics ({title_suffix})", pad=12)
+    _style_axis(ax)
 
     for bar, val in zip(bars, vals):
-        plt.text(
+        ax.text(
             bar.get_x() + bar.get_width() / 2,
             min(val + 0.02, 0.98),
             f"{val:.3f}",
@@ -83,9 +158,9 @@ def _plot_faithfulness_headline(report: Dict, out_path: str, title_suffix: str):
             fontsize=9,
         )
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_per_category_f1_support(report: Dict, out_path: str, title_suffix: str):
@@ -99,13 +174,14 @@ def _plot_per_category_f1_support(report: Dict, out_path: str, title_suffix: str
 
     x = np.arange(len(cats))
 
-    fig, ax1 = plt.subplots(figsize=(12, 4.8))
-    bars = ax1.bar(x, f1, color="#0f766e", alpha=0.9)
+    fig, ax1 = plt.subplots(figsize=(12, 5.2))
+    bars = ax1.bar(x, f1, color="#0F766E", alpha=0.92, edgecolor="white", linewidth=0.8)
     ax1.set_ylim(0, 1.0)
     ax1.set_ylabel("F1")
     ax1.set_xticks(x)
     ax1.set_xticklabels(cats, rotation=35, ha="right")
-    ax1.set_title(f"Per-Category F1 and Support ({title_suffix})")
+    ax1.set_title(f"Per-Category F1 and Support ({title_suffix})", pad=12)
+    _style_axis(ax1)
 
     ax2 = ax1.twinx()
     ax2.plot(x, support, color="#b45309", marker="o", linewidth=2)
@@ -122,7 +198,7 @@ def _plot_per_category_f1_support(report: Dict, out_path: str, title_suffix: str
         )
 
     fig.tight_layout()
-    fig.savefig(out_path, dpi=200)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -157,20 +233,22 @@ def _plot_confusion_heatmap(report: Dict, out_path: str, title_suffix: str):
     if mat.size == 0:
         return
 
-    plt.figure(figsize=(7.8, 6.6))
+    fig, ax = plt.subplots(figsize=(8.2, 6.8))
     vmax = np.max(mat) if np.max(mat) > 0 else 1.0
-    plt.imshow(mat, cmap="YlOrRd", vmin=0, vmax=vmax)
-    plt.colorbar(fraction=0.046, pad=0.04, label="Count")
+    im = ax.imshow(mat, cmap="YlOrRd", vmin=0, vmax=vmax)
+    fig.colorbar(im, fraction=0.046, pad=0.04, label="Count")
 
-    plt.xticks(np.arange(len(cats)), cats, rotation=45, ha="right", fontsize=8)
-    plt.yticks(np.arange(len(cats)), cats, fontsize=8)
-    plt.xlabel("Predicted category")
-    plt.ylabel("Ground truth category")
-    plt.title(f"Category Confusion Heatmap ({title_suffix})")
+    ax.set_xticks(np.arange(len(cats)))
+    ax.set_xticklabels(cats, rotation=45, ha="right", fontsize=9)
+    ax.set_yticks(np.arange(len(cats)))
+    ax.set_yticklabels(cats, fontsize=9)
+    ax.set_xlabel("Predicted category")
+    ax.set_ylabel("Ground truth category")
+    ax.set_title(f"Category Confusion Heatmap ({title_suffix})", pad=8)
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=220)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
 
 
 def _plot_comp_conc_corr(report: Dict, out_path: str, title_suffix: str):
@@ -183,7 +261,7 @@ def _plot_comp_conc_corr(report: Dict, out_path: str, title_suffix: str):
         _safe_float(_get_nested(report, ("completeness", "success_ratio"), np.nan), np.nan),
     ]
 
-    conc_vals = [
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
         _safe_float(_get_nested(report, ("conciseness", "summary", "pearson", "statistic"), 0.0)),
         _safe_float(_get_nested(report, ("conciseness", "summary", "spearman", "statistic"), 0.0)),
         _safe_float(_get_nested(report, ("conciseness", "system", "rank_correlation", "statistic"), 0.0)),
@@ -193,19 +271,27 @@ def _plot_comp_conc_corr(report: Dict, out_path: str, title_suffix: str):
     x = np.arange(len(labels))
     w = 0.35
 
-    plt.figure(figsize=(9.5, 4.8))
-    plt.bar(x - w / 2, comp_vals, width=w, label="Completeness", color="#7c3aed")
-    plt.bar(x + w / 2, conc_vals, width=w, label="Conciseness", color="#2563eb")
+    fig, ax = plt.subplots(figsize=(10, 5.2))
+    b1 = ax.bar(x - w / 2, comp_vals, width=w, label="Completeness", color="#6F42C1", edgecolor="white", linewidth=0.8)
+    b2 = ax.bar(x + w / 2, conc_vals, width=w, label="Conciseness", color="#2A6FDB", edgecolor="white", linewidth=0.8)
 
-    plt.xticks(x, labels)
-    plt.ylim(0, 1.0)
-    plt.ylabel("Score")
-    plt.title(f"Completeness and Conciseness Metrics ({title_suffix})")
-    plt.legend()
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("Score")
+    ax.set_title(f"Completeness and Conciseness Metrics ({title_suffix})", pad=12)
+    _style_axis(ax)
+    ax.legend(frameon=False, loc="upper left")
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
-    plt.close()
+    for bars in (b1, b2):
+        for bar in bars:
+            h = bar.get_height()
+            if not np.isnan(h):
+                ax.text(bar.get_x() + bar.get_width() / 2, min(h + 0.02, 0.98), f"{h:.3f}", ha="center", va="bottom", fontsize=9)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_cross_run_faithfulness(all_reports: List[Tuple[str, Dict]], out_path: str):
@@ -225,20 +311,22 @@ def _plot_cross_run_faithfulness(all_reports: List[Tuple[str, Dict]], out_path: 
     x = np.arange(len(metric_labels))
     width = 0.8 / max(len(run_names), 1)
 
-    plt.figure(figsize=(11.5, 5.2))
+    fig, ax = plt.subplots(figsize=(12, 5.5))
     for i, run_name in enumerate(run_names):
         offset = (i - (len(run_names) - 1) / 2) * width
-        plt.bar(x + offset, values[i], width=width, label=run_name)
+        ax.bar(x + offset, values[i], width=width, label=run_name)
 
-    plt.xticks(x, metric_labels)
-    plt.ylim(0, 1.0)
-    plt.ylabel("Score")
-    plt.title("Cross-Run Faithfulness Comparison")
-    plt.legend(ncol=2, fontsize=8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(metric_labels)
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("Score")
+    ax.set_title("Cross-Run Faithfulness Comparison", pad=12)
+    _style_axis(ax)
+    ax.legend(ncol=2, fontsize=9, frameon=False)
 
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=220)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_cross_run_success(all_reports: List[Tuple[str, Dict]], out_path: str):
@@ -252,19 +340,121 @@ def _plot_cross_run_success(all_reports: List[Tuple[str, Dict]], out_path: str):
     x = np.arange(len(run_names))
     w = 0.35
 
-    plt.figure(figsize=(10.5, 4.8))
-    plt.bar(x - w / 2, faith_success, width=w, label="Faithfulness", color="#0891b2")
-    plt.bar(x + w / 2, conc_success, width=w, label="Conciseness", color="#f59e0b")
+    fig, ax = plt.subplots(figsize=(11, 5.2))
+    ax.bar(x - w / 2, faith_success, width=w, label="Faithfulness", color="#0891B2", edgecolor="white", linewidth=0.8)
+    ax.bar(x + w / 2, conc_success, width=w, label="Conciseness", color="#F59E0B", edgecolor="white", linewidth=0.8)
 
-    plt.xticks(x, run_names, rotation=20, ha="right")
-    plt.ylim(0, 1.0)
-    plt.ylabel("Success ratio")
-    plt.title("Cross-Run Success Ratios")
-    plt.legend()
+    ax.set_xticks(x)
+    ax.set_xticklabels(run_names, rotation=20, ha="right")
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("Success ratio")
+    ax.set_title("Cross-Run Success Ratios", pad=12)
+    _style_axis(ax)
+    ax.legend(frameon=False)
+
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def _plot_cross_run_summary_table(all_reports: List[Tuple[str, Dict]], out_path: str):
+    if not all_reports:
+        return
+
+    rows = []
+    for run_name, report in all_reports:
+        faith = report.get("faithfulness", {})
+        comp = report.get("completeness", {})
+        conc = report.get("conciseness", {})
+        rows.append([
+            run_name,
+            _safe_float(_get_nested(faith, ("sentence", "balanced_accuracy"), 0.0)),
+            _safe_float(_get_nested(faith, ("sentence", "macro_f1"), 0.0)),
+            _safe_float(_get_nested(faith, ("summary", "pearson", "statistic"), 0.0)),
+            _safe_float(_get_nested(faith, ("system", "rank_correlation", "statistic"), 0.0)),
+            _safe_float(_get_nested(comp, ("summary", "pearson", "statistic"), 0.0)),
+            _safe_float(_get_nested(conc, ("summary", "pearson", "statistic"), 0.0)),
+        ])
+
+    fig, ax = plt.subplots(figsize=(13, 0.55 + 0.35 * len(rows)))
+    ax.axis("off")
+
+    col_labels = [
+        "Run",
+        "Faith bAcc",
+        "Faith Macro-F1",
+        "Faith Pearson",
+        "Faith SysRank",
+        "Comp Pearson",
+        "Conc Pearson",
+    ]
+
+    cell_text = [
+        [
+            row[0],
+            f"{row[1]:.3f}",
+            f"{row[2]:.3f}",
+            f"{row[3]:.3f}",
+            f"{row[4]:.3f}",
+            f"{row[5]:.3f}",
+            f"{row[6]:.3f}",
+        ]
+        for row in rows
+    ]
+
+    table = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        loc="center",
+        cellLoc="center",
+        colLoc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.3)
+    ax.set_title("Cross-Run Evaluation Summary", pad=18)
 
     plt.tight_layout()
-    plt.savefig(out_path, dpi=220)
-    plt.close()
+    plt.savefig(out_path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+
+def generate_batch_plots(report_dirs: List[str], output_root: str):
+    if not report_dirs:
+        print("No report directories found.")
+        return False
+
+    os.makedirs(output_root, exist_ok=True)
+
+    all_reports = []
+    for report_dir in report_dirs:
+        report_json = os.path.join(report_dir, "evaluation-report.json")
+        if not os.path.isfile(report_json):
+            print(f"[skip] missing report: {report_json}")
+            continue
+
+        report = _load_report(report_json)
+        report_name = os.path.basename(report_dir)
+        all_reports.append((report_name, report))
+
+        run_out_dir = os.path.join(output_root, report_name)
+        os.makedirs(run_out_dir, exist_ok=True)
+
+        _plot_faithfulness_headline(report, os.path.join(run_out_dir, "plot_faithfulness_headline.png"), report_name)
+        _plot_per_category_f1_support(report, os.path.join(run_out_dir, "plot_per_category_f1_support.png"), report_name)
+        _plot_confusion_heatmap(report, os.path.join(run_out_dir, "plot_category_confusion_heatmap.png"), report_name)
+        _plot_comp_conc_corr(report, os.path.join(run_out_dir, "plot_completeness_conciseness.png"), report_name)
+
+    if not all_reports:
+        print("No valid evaluation reports found.")
+        return False
+
+    _plot_cross_run_faithfulness(all_reports, os.path.join(output_root, "plot_cross_run_faithfulness.png"))
+    _plot_cross_run_success(all_reports, os.path.join(output_root, "plot_cross_run_success.png"))
+    _plot_cross_run_summary_table(all_reports, os.path.join(output_root, "plot_cross_run_summary_table.png"))
+
+    print(f"[ok] generated batch plots in: {output_root}")
+    return True
 
 
 def generate_plots_for_report(report_dir: str):
@@ -310,18 +500,47 @@ def main():
         required=True,
         help="Directory containing one evaluation-report.json",
     )
+    parser.add_argument(
+        "--reports-root",
+        type=str,
+        default=None,
+        help="Directory containing multiple report folders to plot together",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=str,
+        default=None,
+        help="Directory for generated plots when using --reports-root",
+    )
     args = parser.parse_args()
+    _apply_professional_style()
 
-    report_dir = args.report_dir
-    report_json = os.path.join(report_dir, "evaluation-report.json")
-    if not os.path.isdir(report_dir):
-        print(f"Report directory not found: {report_dir}")
-        return
-    if not os.path.isfile(report_json):
-        print(f"evaluation-report.json not found in: {report_dir}")
+    report_dirs = _resolve_report_dirs(args.report_dir, args.reports_root)
+
+    if len(report_dirs) == 0:
+        if args.report_dir:
+            print(f"Report directory not found or invalid: {args.report_dir}")
+        else:
+            print(f"No report directories found under: {args.reports_root}")
         return
 
-    ok = generate_plots_for_report(report_dir)
+    if args.report_dir and not args.reports_root:
+        report_dir = args.report_dir
+        report_json = os.path.join(report_dir, "evaluation-report.json")
+        if not os.path.isdir(report_dir):
+            print(f"Report directory not found: {report_dir}")
+            return
+        if not os.path.isfile(report_json):
+            print(f"evaluation-report.json not found in: {report_dir}")
+            return
+
+        ok = generate_plots_for_report(report_dir)
+        if not ok:
+            print("No plots were generated.")
+        return
+
+    output_root = args.output_root or str(Path(args.reports_root) / "plots")
+    ok = generate_batch_plots(report_dirs, output_root)
     if not ok:
         print("No plots were generated.")
 

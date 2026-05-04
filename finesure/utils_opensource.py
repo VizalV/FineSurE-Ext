@@ -4,6 +4,7 @@ Extended utilities for FineSurE with support for open-source models
 import ast
 import os
 import re
+import time
 from typing import Optional, Dict, Any
 from model_config import get_model_config, MODEL_CONFIGS
 
@@ -381,7 +382,13 @@ def _get_response_huggingface(prompt: str, config: Dict, temperature: float, max
     """
     from transformers import AutoModelForCausalLM, AutoTokenizer
     import torch
-    
+
+    debug_enabled = os.getenv("FINESURE_HF_DEBUG", "1") == "1"
+
+    def _dbg(msg: str) -> None:
+        if debug_enabled:
+            print(f"[HF-DEBUG] {msg}", flush=True)
+
     # Cache model in global scope to avoid reloading
     if not hasattr(_get_response_huggingface, 'model_cache'):
         _get_response_huggingface.model_cache = {}
@@ -392,16 +399,67 @@ def _get_response_huggingface(prompt: str, config: Dict, temperature: float, max
     if model_path not in _get_response_huggingface.model_cache:
         print(f"Loading model from {model_path}...")
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            trust_remote_code=True
-        )
+        _dbg(f"Tokenizer loaded. pad_token_id={tokenizer.pad_token_id}, eos_token_id={tokenizer.eos_token_id}")
+
+        strict_gpu_only = os.getenv("FINESURE_STRICT_GPU_ONLY", "1") == "1"
+        if strict_gpu_only and not torch.cuda.is_available():
+            raise RuntimeError(
+                "FINESURE_STRICT_GPU_ONLY=1 but CUDA is unavailable. "
+                "Disable strict mode or run on a GPU node."
+            )
+
+        preferred_dtype = torch.bfloat16
+        if torch.cuda.is_available() and not torch.cuda.is_bf16_supported():
+            preferred_dtype = torch.float16
+
+        if strict_gpu_only:
+            # Force all weights onto GPU 0. If the model does not fit, fail fast.
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                torch_dtype=preferred_dtype,
+                device_map={"": 0},
+                low_cpu_mem_usage=True,
+                trust_remote_code=True,
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                torch_dtype=preferred_dtype,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+
+        if strict_gpu_only:
+            hf_device_map = getattr(model, "hf_device_map", None)
+            if isinstance(hf_device_map, dict):
+                bad_placements = {
+                    name: dev
+                    for name, dev in hf_device_map.items()
+                    if not (
+                        (isinstance(dev, int) and dev >= 0)
+                        or (isinstance(dev, str) and dev.startswith("cuda"))
+                    )
+                }
+                if bad_placements:
+                    raise RuntimeError(
+                        "Strict GPU mode violation: some model weights were not on CUDA devices: "
+                        f"{bad_placements}"
+                    )
+            else:
+                first_param_device = next(model.parameters()).device
+                if first_param_device.type != "cuda":
+                    raise RuntimeError(
+                        "Strict GPU mode violation: model parameters are not on CUDA. "
+                        f"First parameter device: {first_param_device}"
+                    )
+
         _get_response_huggingface.model_cache[model_path] = (model, tokenizer)
         print(f"Model loaded successfully!")
+        _dbg(f"Model device map ready. model.device={getattr(model, 'device', 'unknown')}")
+        _dbg(f"hf_device_map={getattr(model, 'hf_device_map', None)}")
     else:
         model, tokenizer = _get_response_huggingface.model_cache[model_path]
+        _dbg("Using cached HF model/tokenizer")
     
     # Format as chat (no fallback by design so tokenizer/chat-template errors are surfaced).
     messages = [{"role": "user", "content": prompt}]
@@ -410,9 +468,23 @@ def _get_response_huggingface(prompt: str, config: Dict, temperature: float, max
         tokenize=False,
         add_generation_prompt=True
     )
+    _dbg(f"Prompt chars={len(prompt)}; rendered chat template chars={len(text)}")
     
     # Generate
-    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+    t0 = time.perf_counter()
+    model_inputs = tokenizer([text], return_tensors="pt")
+    _dbg(f"Tokenization done in {time.perf_counter() - t0:.2f}s; input tokens={model_inputs.input_ids.shape[-1]}")
+
+    t1 = time.perf_counter()
+    model_inputs = model_inputs.to(model.device)
+    _dbg(f"Moved inputs to device in {time.perf_counter() - t1:.2f}s")
+    _dbg(f"Input tensor device={model_inputs.input_ids.device}, model.device={model.device}")
+
+    _dbg(
+        "Starting generation with "
+        f"max_new_tokens={max_tokens}, temperature={temperature}, do_sample={temperature > 0}"
+    )
+    t2 = time.perf_counter()
     
     generated_ids = model.generate(
         **model_inputs,
@@ -422,13 +494,20 @@ def _get_response_huggingface(prompt: str, config: Dict, temperature: float, max
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=tokenizer.eos_token_id
     )
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    _dbg(f"Generation finished in {time.perf_counter() - t2:.2f}s")
     
     # Decode only the generated part
     generated_ids = [
         output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
     ]
+    gen_tokens = generated_ids[0].shape[-1] if generated_ids else 0
+    _dbg(f"Generated token count={gen_tokens}")
     
+    t3 = time.perf_counter()
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    _dbg(f"Decode finished in {time.perf_counter() - t3:.2f}s; response chars={len(response)}")
     return response
 
 

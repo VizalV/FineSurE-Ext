@@ -1,2 +1,9 @@
+__pycache__/
 result/*
 reproduce/results/*
+*.sh
+*.txt
+**/.sh/
+**/*.sh
+*.out
+*.err

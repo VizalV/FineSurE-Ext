@@ -6,6 +6,8 @@ This file is additive and keeps baseline scripts unchanged.
 import argparse
 import json
 import os
+import random
+import time
 
 from utils_opensource import (
     compute_faithfulness_percentage_score,
@@ -100,11 +102,19 @@ def main(args):
     print("Prompt style:", args.prompt_style)
     print("n_samples:", args.n_samples)
     print("temperature:", args.temperature)
+    run_start = time.perf_counter()
 
     inputs = []
     with open(args.input_path, "r") as reader:
         for line in reader:
             inputs.append(json.loads(line))
+
+    if args.shuffle_input:
+        random.Random(args.sample_seed).shuffle(inputs)
+    if args.max_examples is not None:
+        inputs = inputs[: args.max_examples]
+
+    print("Loaded examples:", len(inputs))
 
     os.makedirs(args.output_path, exist_ok=True)
     raw_data_path = os.path.join(args.output_path, "raw-data.json")
@@ -123,10 +133,12 @@ def main(args):
         "self_consistency_documents": 0,
         "samples_total": 0,
         "samples_successful": 0,
+        "documents_runtime_sec": 0.0,
     }
 
     with open(raw_data_path, "w") as raw_data_writer, open(enhanced_diag_path, "w") as enhanced_diag_writer:
         for input_id, input_json in enumerate(inputs):
+            doc_start = time.perf_counter()
             doc_id = input_json["doc_id"]
             model_name = input_json["model"]
             src = input_json["transcript"]
@@ -322,6 +334,7 @@ def main(args):
                 json.dump(input_json, raw_data_writer)
                 raw_data_writer.write("\n")
                 raw_data_writer.flush()
+                enhanced_stats["documents_runtime_sec"] += (time.perf_counter() - doc_start)
                 continue
 
             cnt_success_inference += 1
@@ -378,6 +391,7 @@ def main(args):
             json.dump(input_json, raw_data_writer)
             raw_data_writer.write("\n")
             raw_data_writer.flush()
+            enhanced_stats["documents_runtime_sec"] += (time.perf_counter() - doc_start)
 
     with open(result_path, "w") as result_writer:
         if model_labels:
@@ -404,6 +418,18 @@ def main(args):
                 float(enhanced_stats["samples_successful"]) / float(enhanced_stats["samples_total"])
                 if enhanced_stats["samples_total"]
                 else 0.0
+            ),
+        },
+        "runtime": {
+            "total_runtime_sec": time.perf_counter() - run_start,
+            "documents_runtime_sec": enhanced_stats["documents_runtime_sec"],
+            "avg_sec_per_document": (
+                enhanced_stats["documents_runtime_sec"] / enhanced_stats["documents"]
+                if enhanced_stats["documents"] else 0.0
+            ),
+            "avg_sec_per_successful_document": (
+                enhanced_stats["documents_runtime_sec"] / enhanced_stats["successful_documents"]
+                if enhanced_stats["successful_documents"] else 0.0
             ),
         },
     }
@@ -446,6 +472,9 @@ def build_arg_parser():
     parser.add_argument("--temperature", type=float, default=None, help="Override sampling temperature")
     parser.add_argument("--max-tokens", type=int, default=2048, help="Generation max tokens")
     parser.add_argument("--print-interval", type=int, default=10, help="Print rolling results every N docs")
+    parser.add_argument("--max-examples", type=int, default=None, help="Run only first N examples after optional shuffle")
+    parser.add_argument("--shuffle-input", action="store_true", help="Shuffle input before slicing to max-examples")
+    parser.add_argument("--sample-seed", type=int, default=42, help="Seed for input shuffle")
     return parser
 
 
